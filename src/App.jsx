@@ -289,6 +289,52 @@ function HireTrack() {
   }
 
   /* ── AI CV parse ── */
+  async function extractTextFromFile(file) {
+    // PDF extraction using PDF.js from CDN
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = async (e) => {
+          try {
+            // Dynamically load PDF.js from CDN
+            if (!window.pdfjsLib) {
+              await new Promise((res, rej) => {
+                const script = document.createElement('script')
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+                script.onload = res
+                script.onerror = rej
+                document.head.appendChild(script)
+              })
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+            }
+            const typedArray = new Uint8Array(e.target.result)
+            const pdf = await window.pdfjsLib.getDocument({ data: typedArray }).promise
+            let fullText = ''
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i)
+              const content = await page.getTextContent()
+              const pageText = content.items.map(item => item.str).join(' ')
+              fullText += pageText + '\n'
+            }
+            resolve(fullText)
+          } catch (err) {
+            reject(err)
+          }
+        }
+        reader.onerror = reject
+        reader.readAsArrayBuffer(file)
+      })
+    }
+    // For .txt, .doc, .docx, .rtf — read as plain text
+    return new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = e => res(e.target.result)
+      r.onerror = rej
+      r.readAsText(file)
+    })
+  }
+
   async function parseCV(file) {
     const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
     if (!apiKey) {
@@ -299,12 +345,10 @@ function HireTrack() {
     setParsing(true)
     setParseMsg('Reading file…')
     try {
-      const text = await new Promise((res, rej) => {
-        const r = new FileReader()
-        r.onload = e => res(e.target.result)
-        r.onerror = rej
-        r.readAsText(file)
-      })
+      const text = await extractTextFromFile(file)
+      if (!text || text.trim().length < 20) {
+        throw new Error('Could not extract text from file')
+      }
       setFormData(f => ({...f, resume_file_name: file.name, resume_text: text}))
       setParseMsg('AI is analysing your CV…')
 
@@ -366,7 +410,7 @@ ${text.slice(0, 7000)}`
       }))
       setParseMsg('✅ CV parsed! Review and edit below.')
     } catch (e) {
-      setParseMsg('⚠️ Auto-parse failed. Fill in details manually.')
+      setParseMsg('⚠️ Could not read this file. Make sure the PDF is not password-protected, or try a .txt/.docx file.')
     }
     setParsing(false)
   }
