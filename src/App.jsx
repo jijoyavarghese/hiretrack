@@ -322,9 +322,7 @@ function HireTrack() {
           const page = await pdf.getPage(i)
           const content = await page.getTextContent()
           const pageText = content.items.map(item => item.str).join(' ')
-          fullText += pageText + '
-
-'
+          fullText += pageText + ' '
         }
         if (!fullText.trim()) throw new Error('No text extracted')
         return fullText
