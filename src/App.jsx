@@ -701,8 +701,8 @@ ${text.slice(0, 7000)}`
   if (page === 'form') {
     const isNew = !formData.id
     const set = (k,v) => setFormData(f=>({...f,[k]:v}))
-    const formTabs = ['cv','info','professional','interview','notes']
-    const formTabLabels = {cv:'📄 CV',info:'Basic',professional:'Pro',interview:'Interview',notes:'Notes'}
+    const formTabs = ['cv','info','professional','notes']
+    const formTabLabels = {cv:'📄 CV',info:'Basic',professional:'Pro',notes:'Notes'}
 
     return (
       <div style={{ minHeight:'100vh', background:'#F5F4F1', paddingBottom:90 }}>
@@ -867,24 +867,6 @@ ${text.slice(0, 7000)}`
                 <textarea style={{...inp,resize:'vertical',minHeight:80,fontFamily:'Sora,sans-serif'}}
                   value={formData.skills} onChange={e=>set('skills',e.target.value)}
                   placeholder="React, Node.js, Python, SQL…"/></div>
-            </>
-          )}
-
-          {/* Interview tab */}
-          {tab==='interview' && (
-            <>
-              <div style={grid2}>
-                <div><label style={lbl}>Interview Date</label>
-                  <input type="date" style={inp} value={formData.interview_date} onChange={e=>set('interview_date',e.target.value)}/></div>
-                <div><label style={lbl}>Interviewer</label>
-                  <input style={inp} value={formData.interviewer_name} onChange={e=>set('interviewer_name',e.target.value)} placeholder="Rahul Mehta"/></div>
-              </div>
-              <div><label style={lbl}>Overall Rating</label>
-                <div style={{ marginTop:6 }}><Stars value={formData.rating} onChange={v=>set('rating',v)} size={30}/></div></div>
-              <div><label style={lbl}>Interview Feedback</label>
-                <textarea style={{...inp,resize:'vertical',minHeight:110,fontFamily:'Sora,sans-serif'}}
-                  value={formData.feedback} onChange={e=>set('feedback',e.target.value)}
-                  placeholder="Strengths, weaknesses, recommendation…"/></div>
             </>
           )}
 
