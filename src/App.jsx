@@ -809,20 +809,107 @@ ${text.slice(0, 7000)}`
     )
   }
 
-  /* ══════ DETAIL PAGE ══════ */
+  /* ══════ DETAIL PAGE — 4-stage pipeline ══════ */
   if (page === 'detail') {
     const c = candidates.find(x=>x.id===selectedId)
     if (!c) { goList(); return null }
     const av = avatarColor(c.name||'A')
     const skills = c.skills ? c.skills.split(',').map(s=>s.trim()).filter(Boolean) : []
-    const dTabs = ['info','professional','interview','notes']
-    const dTabLabels = {info:'Info',professional:'Professional',interview:'Interview',notes:'Notes'}
+
+    // Derive pipeline stage from status
+    const STAGE = (() => {
+      if (['Hired','Rejected','On Hold','Offer Extended'].includes(c.status)) return 4
+      if (c.status === 'Interview Done') return 4
+      if (c.status === 'Interview Scheduled') return 3
+      return 2 // Screening complete, ready to schedule
+    })()
+
+    // Stage 2 — schedule interview inline state
+    const [schedDate, setSchedDate]         = useState(c.interview_date || '')
+    const [schedInterviewer, setSchedInter] = useState(c.interviewer_name || '')
+    const [schedSaving, setSchedSaving]     = useState(false)
+
+    // Stage 3 — interview feedback inline state
+    const [intRating, setIntRating]   = useState(c.rating || 0)
+    const [intFeedback, setIntFeedback] = useState(c.feedback || '')
+    const [intNotes, setIntNotes]     = useState(c.notes || '')
+    const [intSaving, setIntSaving]   = useState(false)
+
+    async function saveSchedule() {
+      if (!schedDate) return showToast('Interview date is required', 'error')
+      if (!schedInterviewer.trim()) return showToast('Interviewer name is required', 'error')
+      setSchedSaving(true)
+      try {
+        const { error } = await supabase.from('candidates').update({
+          interview_date: schedDate,
+          interviewer_name: schedInterviewer.trim(),
+          status: 'Interview Scheduled',
+        }).eq('id', c.id)
+        if (error) throw error
+        await loadAll()
+        showToast('Interview scheduled!')
+      } catch (e) { showToast('Save failed: ' + e.message, 'error') }
+      setSchedSaving(false)
+    }
+
+    async function saveInterview() {
+      setIntSaving(true)
+      try {
+        const { error } = await supabase.from('candidates').update({
+          rating: intRating,
+          feedback: intFeedback.trim(),
+          notes: intNotes.trim(),
+          status: 'Interview Done',
+        }).eq('id', c.id)
+        if (error) throw error
+        await loadAll()
+        showToast('Interview saved!')
+      } catch (e) { showToast('Save failed: ' + e.message, 'error') }
+      setIntSaving(false)
+    }
+
+    async function saveOutcome(status) {
+      try {
+        const { error } = await supabase.from('candidates').update({ status }).eq('id', c.id)
+        if (error) throw error
+        await loadAll()
+        showToast(`Marked as ${status}`)
+      } catch (e) { showToast('Update failed: ' + e.message, 'error') }
+    }
+
+    const OUTCOME_STATUSES = ['Offer Extended','Hired','Rejected','On Hold']
+
+    // Pipeline stepper config
+    const steps = [
+      { n:1, label:'Screening',  done: true },
+      { n:2, label:'Schedule',   done: STAGE >= 3 },
+      { n:3, label:'Interview',  done: STAGE >= 4 },
+      { n:4, label:'Outcome',    done: ['Hired','Rejected','Offer Extended'].includes(c.status) },
+    ]
+
+    const sectionCard = {
+      background:'#fff', borderRadius:14, border:'1px solid #EFEFED',
+      boxShadow:'0 1px 4px rgba(0,0,0,.05)', overflow:'hidden',
+    }
+    const sectionHeader = (color, done) => ({
+      padding:'13px 16px', display:'flex', alignItems:'center', gap:10,
+      background: done ? '#F0FDF4' : color+'0D',
+      borderBottom:'1px solid #EFEFED',
+    })
+    const fieldGrid = {
+      display:'grid', gridTemplateColumns:'1fr 1fr', gap:1,
+      background:'#EFEFED', borderRadius:0,
+    }
+    const fieldCell = { background:'#fff', padding:'11px 14px' }
+    const fieldLabel = { fontSize:10, fontWeight:700, color:'#94A3B8', letterSpacing:.5, textTransform:'uppercase', marginBottom:3 }
+    const fieldValue = { fontSize:13, fontWeight:600, color:'#18181B', wordBreak:'break-all' }
 
     return (
-      <div style={{ minHeight:'100vh', background:'#F5F4F1', paddingBottom:30 }}>
+      <div style={{ minHeight:'100vh', background:'#F5F4F1', paddingBottom:40 }}>
         {toast && <Toast {...toast} />}
 
-        <div style={{ background:'#18181B', padding:'14px 16px 18px' }}>
+        {/* Header */}
+        <div style={{ background:'#18181B', padding:'14px 16px 20px' }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
             <button style={ghostBtn} onClick={goList}>← All</button>
             <div style={{ flex:1 }}/>
@@ -836,7 +923,7 @@ ${text.slice(0, 7000)}`
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontWeight:800,fontSize:18,color:'#fff',letterSpacing:-.3 }}>{c.name}</div>
               <div style={{ fontSize:13,color:'#94A3B8',marginTop:1 }}>{c.position}</div>
-              {c.location && <div style={{ fontSize:12,color:'#64748B',marginTop:1 }}>📍 {c.location}</div>}
+              {c.location && <div style={{ fontSize:12,color:'#64748B',marginTop:2 }}>📍 {c.location}</div>}
             </div>
           </div>
           <div style={{ display:'flex',flexWrap:'wrap',gap:5,marginTop:12 }}>
@@ -846,111 +933,247 @@ ${text.slice(0, 7000)}`
           </div>
         </div>
 
-        {/* Quick status */}
-        <div style={{ background:'#fff',padding:'11px 14px',borderBottom:'1px solid #F4F4F5' }}>
-          <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.6,marginBottom:7,textTransform:'uppercase' }}>Update Status</div>
-          <div style={{ display:'flex',gap:5,overflowX:'auto',paddingBottom:2 }}>
-            {Object.keys(STATUS_CONFIG).map(s=>(
-              <button key={s} onClick={()=>updateStatus(c.id,s)}
-                style={{ background:c.status===s?STATUS_CONFIG[s].bg:'#F4F4F5',
-                  color:c.status===s?STATUS_CONFIG[s].color:'#6B7280',
-                  border:c.status===s?`1.5px solid ${STATUS_CONFIG[s].color}55`:'1.5px solid transparent',
-                  borderRadius:7,padding:'5px 10px',fontSize:10,fontWeight:700,
-                  cursor:'pointer',whiteSpace:'nowrap',transition:'all .15s' }}>{s}</button>
+        {/* Pipeline stepper */}
+        <div style={{ background:'#fff', padding:'14px 16px', borderBottom:'1px solid #F4F4F5' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            {steps.map((s, i) => (
+              <div key={s.n} style={{ display:'flex', alignItems:'center', flex: i < steps.length-1 ? 1 : 'none' }}>
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                  <div style={{
+                    width:28, height:28, borderRadius:'50%', display:'flex', alignItems:'center',
+                    justifyContent:'center', fontWeight:800, fontSize:12,
+                    background: s.done ? '#10B981' : STAGE === s.n ? '#FF6B35' : '#E4E4E7',
+                    color: (s.done || STAGE === s.n) ? '#fff' : '#94A3B8',
+                    boxShadow: STAGE === s.n ? '0 0 0 3px #FF6B3530' : 'none',
+                    transition:'all .2s',
+                  }}>
+                    {s.done ? '✓' : s.n}
+                  </div>
+                  <div style={{ fontSize:9, fontWeight:700, color: s.done ? '#10B981' : STAGE===s.n ? '#FF6B35' : '#94A3B8',
+                    letterSpacing:.3, textTransform:'uppercase', whiteSpace:'nowrap' }}>{s.label}</div>
+                </div>
+                {i < steps.length-1 && (
+                  <div style={{ flex:1, height:2, margin:'0 4px', marginBottom:14,
+                    background: steps[i+1].done || STAGE > s.n ? '#10B981' : '#E4E4E7',
+                    transition:'background .3s' }}/>
+                )}
+              </div>
             ))}
           </div>
         </div>
 
-        <div style={{ display:'flex',borderBottom:'2px solid #F4F4F5',background:'#fff',
-          overflowX:'auto',scrollbarWidth:'none' }}>
-          {dTabs.map(t=><div key={t} style={tabStyle(detailTab===t)} onClick={()=>setDetailTab(t)}>{dTabLabels[t]}</div>)}
-        </div>
+        <div style={{ padding:'14px 14px', display:'flex', flexDirection:'column', gap:12 }}>
 
-        <div style={{ padding:14, display:'flex', flexDirection:'column', gap:10 }} className="fade">
+          {/* ── Stage 1: Screening (always visible, read-only summary) ── */}
+          <div style={sectionCard}>
+            <div style={sectionHeader('#10B981', true)}>
+              <div style={{ width:22,height:22,borderRadius:'50%',background:'#10B981',color:'#fff',
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>✓</div>
+              <div style={{ fontWeight:700,fontSize:14,color:'#15803D' }}>Stage 1 — Screening</div>
+              <div style={{ flex:1 }}/>
+              <button style={{ background:'transparent',border:'none',color:'#94A3B8',fontSize:12,
+                cursor:'pointer',padding:'2px 6px' }} onClick={()=>goEdit(c)}>Edit</button>
+            </div>
+            <div style={fieldGrid}>
+              {[
+                {l:'Email',   v:c.email||'—'},
+                {l:'Phone',   v:c.phone||'—'},
+                {l:'Applied', v:c.applied_date||'—'},
+                {l:'Source',  v:c.source},
+                {l:'Experience', v:c.experience?`${c.experience} yrs`:'—'},
+                {l:'Notice',     v:c.notice_period||'—'},
+                {l:'Current CTC',v:c.current_ctc||'—'},
+                {l:'Expected CTC',v:c.expected_ctc||'—'},
+              ].map(({l,v})=>(
+                <div key={l} style={fieldCell}>
+                  <div style={fieldLabel}>{l}</div>
+                  <div style={fieldValue}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {skills.length > 0 && (
+              <div style={{ padding:'11px 14px', borderTop:'1px solid #F4F4F5' }}>
+                <div style={fieldLabel}>Skills</div>
+                <div style={{ display:'flex',flexWrap:'wrap',gap:4,marginTop:5 }}>
+                  {skills.map(s=>(
+                    <span key={s} style={{ background:'#F4F4F5',color:'#374151',borderRadius:5,
+                      padding:'2px 8px',fontSize:11,fontWeight:500 }}>{s}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {c.resume_file_name && (
+              <div style={{ padding:'10px 14px', borderTop:'1px solid #F4F4F5',
+                display:'flex',alignItems:'center',gap:8 }}>
+                <span style={{ fontSize:16 }}>📄</span>
+                <span style={{ fontSize:12,fontWeight:600,color:'#15803D' }}>{c.resume_file_name}</span>
+              </div>
+            )}
+          </div>
 
-          {detailTab==='info' && (
-            <>
-              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,
-                background:'#EFEFED',borderRadius:13,overflow:'hidden' }}>
-                {[{l:'Email',v:c.email||'—'},{l:'Phone',v:c.phone||'—'},
-                  {l:'Applied',v:c.applied_date||'—'},{l:'Source',v:c.source}].map(({l,v})=>(
-                  <div key={l} style={{ background:'#fff',padding:13 }}>
-                    <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:3 }}>{l}</div>
-                    <div style={{ fontSize:13,fontWeight:600,wordBreak:'break-all' }}>{v}</div>
+          {/* ── Stage 2: Schedule Interview ── */}
+          <div style={{ ...sectionCard, opacity: STAGE >= 2 ? 1 : 0.5 }}>
+            <div style={sectionHeader('#3B82F6', STAGE >= 3)}>
+              <div style={{ width:22,height:22,borderRadius:'50%',
+                background: STAGE >= 3 ? '#10B981' : STAGE === 2 ? '#3B82F6' : '#E4E4E7',
+                color: STAGE >= 2 ? '#fff' : '#94A3B8',
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>
+                {STAGE >= 3 ? '✓' : '2'}
+              </div>
+              <div style={{ fontWeight:700,fontSize:14,color: STAGE >= 3 ? '#15803D' : STAGE===2 ? '#1D4ED8' : '#94A3B8' }}>
+                Stage 2 — Schedule Interview
+              </div>
+            </div>
+
+            {STAGE >= 3 ? (
+              // Already scheduled — show read-only
+              <div style={fieldGrid}>
+                <div style={fieldCell}>
+                  <div style={fieldLabel}>Interview Date</div>
+                  <div style={fieldValue}>{c.interview_date||'—'}</div>
+                </div>
+                <div style={fieldCell}>
+                  <div style={fieldLabel}>Interviewer</div>
+                  <div style={fieldValue}>{c.interviewer_name||'—'}</div>
+                </div>
+              </div>
+            ) : STAGE === 2 ? (
+              // Active — show form
+              <div style={{ padding:14, display:'flex', flexDirection:'column', gap:12 }}>
+                <div>
+                  <label style={{...fieldLabel,display:'block',marginBottom:5}}>Interview Date *</label>
+                  <input type="date" style={inp} value={schedDate} onChange={e=>setSchedDate(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={{...fieldLabel,display:'block',marginBottom:5}}>Interviewer Name *</label>
+                  <input style={inp} value={schedInterviewer} onChange={e=>setSchedInter(e.target.value)}
+                    placeholder="e.g. Rahul Mehta"/>
+                </div>
+                <button style={{...primaryBtn,justifyContent:'center',opacity:schedSaving?.7:1}}
+                  onClick={saveSchedule} disabled={schedSaving}>
+                  {schedSaving ? '⏳ Saving…' : '📅 Confirm Schedule & Notify'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ padding:14,color:'#94A3B8',fontSize:13,textAlign:'center' }}>
+                Complete screening first
+              </div>
+            )}
+          </div>
+
+          {/* ── Stage 3: Interview Feedback ── */}
+          <div style={{ ...sectionCard, opacity: STAGE >= 3 ? 1 : 0.5 }}>
+            <div style={sectionHeader('#7C3AED', STAGE >= 4)}>
+              <div style={{ width:22,height:22,borderRadius:'50%',
+                background: STAGE >= 4 ? '#10B981' : STAGE === 3 ? '#7C3AED' : '#E4E4E7',
+                color: STAGE >= 3 ? '#fff' : '#94A3B8',
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>
+                {STAGE >= 4 ? '✓' : '3'}
+              </div>
+              <div style={{ fontWeight:700,fontSize:14,color: STAGE >= 4 ? '#15803D' : STAGE===3 ? '#5B21B6' : '#94A3B8' }}>
+                Stage 3 — Interview
+              </div>
+            </div>
+
+            {STAGE >= 4 && c.status !== 'Interview Scheduled' ? (
+              // Done — read-only
+              <div style={{ padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+                <div>
+                  <div style={fieldLabel}>Rating</div>
+                  <div style={{ marginTop:4 }}>{c.rating>0 ? <Stars value={c.rating} size={20}/> : <span style={{color:'#94A3B8',fontSize:13}}>Not rated</span>}</div>
+                </div>
+                {c.feedback && (
+                  <div>
+                    <div style={fieldLabel}>Feedback</div>
+                    <div style={{ fontSize:13,color:'#374151',lineHeight:1.7,marginTop:4,whiteSpace:'pre-wrap' }}>{c.feedback}</div>
                   </div>
-                ))}
-              </div>
-              {c.resume_file_name && (
-                <div style={{ background:'#F0FDF4',border:'1px solid #BBF7D0',borderRadius:11,
-                  padding:'11px 13px',display:'flex',alignItems:'center',gap:8 }}>
-                  <span style={{ fontSize:20 }}>📄</span>
-                  <span style={{ fontWeight:600,color:'#15803D',fontSize:13 }}>{c.resume_file_name}</span>
-                </div>
-              )}
-            </>
-          )}
-
-          {detailTab==='professional' && (
-            <>
-              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'#EFEFED',borderRadius:13,overflow:'hidden' }}>
-                {[
-                  {l:'Experience',  v:c.experience?`${c.experience} yrs`:'—'},
-                  {l:'Notice',      v:c.notice_period||'—'},
-                  {l:'Current CTC', v:c.current_ctc||'—'},
-                  {l:'Expected CTC',v:c.expected_ctc||'—'},
-                ].map(({l,v})=>(
-                  <div key={l} style={{ background:'#fff',padding:13 }}>
-                    <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:3 }}>{l}</div>
-                    <div style={{ fontSize:14,fontWeight:700,color:'#18181B' }}>{v}</div>
+                )}
+                {c.notes && (
+                  <div>
+                    <div style={fieldLabel}>Notes</div>
+                    <div style={{ fontSize:13,color:'#374151',lineHeight:1.7,marginTop:4,whiteSpace:'pre-wrap' }}>{c.notes}</div>
                   </div>
-                ))}
+                )}
               </div>
-              {skills.length>0 && (
-                <div style={{ background:'#fff',borderRadius:13,padding:13,border:'1px solid #EFEFED' }}>
-                  <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:9 }}>Skills</div>
-                  <div style={{ display:'flex',flexWrap:'wrap',gap:5 }}>
-                    {skills.map(s=>(
-                      <span key={s} style={{ background:'#F4F4F5',color:'#374151',borderRadius:6,padding:'3px 9px',fontSize:12,fontWeight:500 }}>{s}</span>
-                    ))}
+            ) : STAGE === 3 ? (
+              // Active — show form
+              <div style={{ padding:14, display:'flex', flexDirection:'column', gap:12 }}>
+                <div>
+                  <label style={{...fieldLabel,display:'block',marginBottom:6}}>Overall Rating</label>
+                  <Stars value={intRating} onChange={setIntRating} size={28}/>
+                </div>
+                <div>
+                  <label style={{...fieldLabel,display:'block',marginBottom:5}}>Interview Feedback</label>
+                  <textarea style={{...inp,resize:'vertical',minHeight:100,fontFamily:'inherit'}}
+                    value={intFeedback} onChange={e=>setIntFeedback(e.target.value)}
+                    placeholder="Strengths, weaknesses, recommendation…"/>
+                </div>
+                <div>
+                  <label style={{...fieldLabel,display:'block',marginBottom:5}}>Recruiter Notes</label>
+                  <textarea style={{...inp,resize:'vertical',minHeight:70,fontFamily:'inherit'}}
+                    value={intNotes} onChange={e=>setIntNotes(e.target.value)}
+                    placeholder="Follow-up tasks, observations…"/>
+                </div>
+                <button style={{...primaryBtn,justifyContent:'center',background:'linear-gradient(135deg,#7C3AED,#5B21B6)',opacity:intSaving?.7:1}}
+                  onClick={saveInterview} disabled={intSaving}>
+                  {intSaving ? '⏳ Saving…' : '✅ Save Interview & Proceed to Outcome'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ padding:14,color:'#94A3B8',fontSize:13,textAlign:'center' }}>
+                Schedule interview first
+              </div>
+            )}
+          </div>
+
+          {/* ── Stage 4: Outcome ── */}
+          <div style={{ ...sectionCard, opacity: STAGE >= 4 ? 1 : 0.5 }}>
+            <div style={sectionHeader('#FF6B35', ['Hired','Rejected','Offer Extended'].includes(c.status))}>
+              <div style={{ width:22,height:22,borderRadius:'50%',
+                background: ['Hired','Rejected','Offer Extended'].includes(c.status) ? '#10B981' : STAGE===4 ? '#FF6B35' : '#E4E4E7',
+                color: STAGE >= 4 ? '#fff' : '#94A3B8',
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>
+                {['Hired','Rejected','Offer Extended'].includes(c.status) ? '✓' : '4'}
+              </div>
+              <div style={{ fontWeight:700,fontSize:14,
+                color: ['Hired','Rejected','Offer Extended'].includes(c.status) ? '#15803D' : STAGE===4 ? '#C2410C' : '#94A3B8' }}>
+                Stage 4 — Outcome
+              </div>
+            </div>
+
+            {STAGE >= 4 ? (
+              <div style={{ padding:14 }}>
+                {['Hired','Rejected','Offer Extended'].includes(c.status) ? (
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <Pill label={c.status} cfg={STATUS_CONFIG[c.status]}/>
+                    <button style={{ background:'transparent',border:'none',color:'#94A3B8',fontSize:12,cursor:'pointer' }}
+                      onClick={()=>saveOutcome('Interview Done')}>↩ Reset</button>
                   </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {detailTab==='interview' && (
-            <>
-              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'#EFEFED',borderRadius:13,overflow:'hidden' }}>
-                <div style={{ background:'#fff',padding:13 }}>
-                  <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:3 }}>Date</div>
-                  <div style={{ fontSize:13,fontWeight:600 }}>{c.interview_date||'—'}</div>
-                </div>
-                <div style={{ background:'#fff',padding:13 }}>
-                  <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:3 }}>Interviewer</div>
-                  <div style={{ fontSize:13,fontWeight:600 }}>{c.interviewer_name||'—'}</div>
-                </div>
-                <div style={{ background:'#fff',padding:13,gridColumn:'1/-1' }}>
-                  <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:6 }}>Rating</div>
-                  {c.rating>0 ? <Stars value={c.rating} size={22}/> : <span style={{ color:'#94A3B8',fontSize:13 }}>Not rated</span>}
-                </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize:12,color:'#6B7280',marginBottom:10,fontWeight:600 }}>Select final outcome:</div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                      {OUTCOME_STATUSES.map(s=>(
+                        <button key={s} onClick={()=>saveOutcome(s)}
+                          style={{ padding:'11px 8px', borderRadius:10, border:`1.5px solid ${STATUS_CONFIG[s]?.color||'#E4E4E7'}20`,
+                            background: STATUS_CONFIG[s]?.bg||'#F4F4F5',
+                            color: STATUS_CONFIG[s]?.color||'#374151',
+                            fontWeight:700, fontSize:12, cursor:'pointer', transition:'all .15s',
+                            boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-              {c.feedback && (
-                <div style={{ background:'#fff',borderRadius:13,padding:13,border:'1px solid #EFEFED' }}>
-                  <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:8 }}>Feedback</div>
-                  <div style={{ fontSize:14,color:'#374151',lineHeight:1.75,whiteSpace:'pre-wrap' }}>{c.feedback}</div>
-                </div>
-              )}
-            </>
-          )}
-
-          {detailTab==='notes' && (
-            c.notes ? (
-              <div style={{ background:'#fff',borderRadius:13,padding:13,border:'1px solid #EFEFED' }}>
-                <div style={{ fontSize:10,fontWeight:700,color:'#94A3B8',letterSpacing:.5,textTransform:'uppercase',marginBottom:8 }}>Notes</div>
-                <div style={{ fontSize:14,color:'#374151',lineHeight:1.75,whiteSpace:'pre-wrap' }}>{c.notes}</div>
+            ) : (
+              <div style={{ padding:14,color:'#94A3B8',fontSize:13,textAlign:'center' }}>
+                Complete interview first
               </div>
-            ) : <div style={{ textAlign:'center',padding:'30px 0',color:'#94A3B8',fontSize:13 }}>No notes added.</div>
-          )}
+            )}
+          </div>
+
         </div>
       </div>
     )
