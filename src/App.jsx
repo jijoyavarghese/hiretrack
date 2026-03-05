@@ -179,6 +179,14 @@ function HireTrack() {
   const [loading, setLoading]       = useState(true)
   const [saving, setSaving]         = useState(false)
   const [toast, setToast]           = useState(null)
+  // Detail page states — must live at top level (Rules of Hooks)
+  const [schedDate, setSchedDate]         = useState('')
+  const [schedInterviewer, setSchedInter] = useState('')
+  const [schedSaving, setSchedSaving]     = useState(false)
+  const [intRating, setIntRating]         = useState(0)
+  const [intFeedback, setIntFeedback]     = useState('')
+  const [intNotes, setIntNotes]           = useState('')
+  const [intSaving, setIntSaving]         = useState(false)
   const fileRef = useRef()
 
   const showToast = (msg, type = 'success') => {
@@ -225,7 +233,19 @@ function HireTrack() {
   /* ── nav ── */
   function goNew()     { setFormData(blank()); setTab('cv'); setParseMsg(''); setPage('form') }
   function goEdit(c)   { setFormData({...c, rating: c.rating||0 }); setTab('info'); setParseMsg(''); setPage('form') }
-  function goDetail(c) { setSelectedId(c.id); setDetailTab('info'); setPage('detail') }
+  function goDetail(c) {
+    setSelectedId(c.id)
+    setDetailTab('info')
+    // Seed detail page states from candidate data
+    setSchedDate(c.interview_date || '')
+    setSchedInter(c.interviewer_name || '')
+    setSchedSaving(false)
+    setIntRating(c.rating || 0)
+    setIntFeedback(c.feedback || '')
+    setIntNotes(c.notes || '')
+    setIntSaving(false)
+    setPage('detail')
+  }
   function goList()    { setPage('list') }
 
   /* ── save ── */
@@ -825,15 +845,7 @@ ${text.slice(0, 7000)}`
     })()
 
     // Stage 2 — schedule interview inline state
-    const [schedDate, setSchedDate]         = useState(c.interview_date || '')
-    const [schedInterviewer, setSchedInter] = useState(c.interviewer_name || '')
-    const [schedSaving, setSchedSaving]     = useState(false)
 
-    // Stage 3 — interview feedback inline state
-    const [intRating, setIntRating]   = useState(c.rating || 0)
-    const [intFeedback, setIntFeedback] = useState(c.feedback || '')
-    const [intNotes, setIntNotes]     = useState(c.notes || '')
-    const [intSaving, setIntSaving]   = useState(false)
 
     async function saveSchedule() {
       if (!schedDate) return showToast('Interview date is required', 'error')
