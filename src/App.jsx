@@ -238,6 +238,9 @@ function HireTrack() {
       delete payload.id
       delete payload.created_at
       delete payload.updated_at
+      // Supabase DATE columns reject empty strings — convert to null
+      const dateFields = ['interview_date', 'applied_date']
+      dateFields.forEach(f => { if (!payload[f]) payload[f] = null })
       if (formData.id) {
         const { error } = await supabase.from('candidates').update(payload).eq('id', formData.id)
         if (error) throw error
