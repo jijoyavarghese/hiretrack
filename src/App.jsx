@@ -29,7 +29,7 @@ function avatarColor(name = 'A') {
 const blank = () => ({
   name: '', email: '', phone: '', position: '', source: 'Naukri India',
   status: 'Screening', experience: '', current_ctc: '', expected_ctc: '',
-  notice_period: '', location: '', skills: '', resume_text: '', resume_file_name: '',
+  notice_period: '', location: '', skills: '', resume_text: '', resume_file_name: '', resume_url: '',
   feedback: '', rating: 0, interview_date: '', interviewer_name: '',
   notes: '', applied_date: new Date().toISOString().slice(0, 10),
 })
@@ -366,7 +366,7 @@ function HireTrack() {
     const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
     if (!apiKey) {
       setParseMsg('⚠️ VITE_ANTHROPIC_API_KEY not set. Fill in details manually.')
-      setFormData(f => ({...f, resume_file_name: file.name}))
+      setFormData(f => ({...f, resume_file_name: file.name, resume_url: ''}))
       return
     }
     setParsing(true)
@@ -376,7 +376,25 @@ function HireTrack() {
       if (!text || text.trim().length < 20) {
         throw new Error('Could not extract text from file')
       }
-      setFormData(f => ({...f, resume_file_name: file.name, resume_text: text}))
+
+      // Upload file to Supabase Storage
+      setParseMsg('Uploading CV to storage…')
+      let resumeUrl = ''
+      try {
+        const ext = file.name.split('.').pop()
+        const path = `resumes/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('resumes')
+          .upload(path, file, { cacheControl: '3600', upsert: false })
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(path)
+          resumeUrl = urlData?.publicUrl || ''
+        }
+      } catch (uploadErr) {
+        console.warn('Storage upload failed:', uploadErr)
+      }
+
+      setFormData(f => ({...f, resume_file_name: file.name, resume_text: text, resume_url: resumeUrl}))
       setParseMsg('AI is analysing your CV…')
 
       const prompt = `You are a CV parsing assistant for the Indian job market. Extract structured information from this CV and return ONLY a raw JSON object (no markdown, no backticks, no explanation):
@@ -557,8 +575,42 @@ ${text.slice(0, 7000)}`
               </div>
             ) : filtered.map(c => {
               const av = avatarColor(c.name||'A')
+
+              // Derive stage number + label for this candidate
+              const stageNum = (() => {
+                if (['Hired','Rejected','On Hold','Offer Extended','Interview Done'].includes(c.status)) return 4
+                if (c.status === 'Interview Scheduled') return 3
+                return c.status === 'Screening' ? 1 : 2
+              })()
+              const stageLabel = ['','Screening','Schedule Interview','Interview','Outcome'][stageNum]
+              const stageDotColor = ['','#D97706','#2563EB','#7C3AED','#059669'][stageNum]
+
+              // Mini pipeline dots
+              const miniSteps = [1,2,3,4]
+
               return (
-                <div key={c.id} style={{...card,cursor:'pointer'}} className="fade" onClick={()=>goDetail(c)}>
+                <div key={c.id} style={{...card,cursor:'pointer',overflow:'hidden'}} className="fade" onClick={()=>goDetail(c)}>
+                  {/* Stage bar at top */}
+                  <div style={{ background: stageDotColor+'12', borderBottom:'1px solid '+stageDotColor+'25',
+                    padding:'5px 13px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <div style={{ width:6,height:6,borderRadius:'50%',background:stageDotColor }}/>
+                      <span style={{ fontSize:10,fontWeight:700,color:stageDotColor,letterSpacing:.3 }}>
+                        STAGE {stageNum} · {stageLabel.toUpperCase()}
+                      </span>
+                    </div>
+                    {/* Mini pipeline progress */}
+                    <div style={{ display:'flex', alignItems:'center', gap:3 }}>
+                      {miniSteps.map((s,i) => (
+                        <span key={s} style={{ display:'flex', alignItems:'center', gap:3 }}>
+                          <div style={{ width: s <= stageNum ? 16 : 10, height:4, borderRadius:99,
+                            background: s < stageNum ? '#10B981' : s === stageNum ? stageDotColor : '#E4E4E7',
+                            transition:'all .2s' }}/>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
                   <div style={{ padding:13 }}>
                     <div style={{ display:'flex', gap:11, alignItems:'flex-start' }}>
                       <div style={{ width:42,height:42,borderRadius:11,background:av.bg,color:av.fg,
@@ -580,11 +632,51 @@ ${text.slice(0, 7000)}`
                         {c.notice_period && <span style={{ fontSize:10,color:'#94A3B8' }}>{c.notice_period}</span>}
                       </div>
                     </div>
+
+                    {/* Interview scheduled banner */}
+                    {c.interview_date && (stageNum === 3 || stageNum === 4) && (
+                      <div style={{ marginTop:9, background:'#EFF6FF', border:'1px solid #BFDBFE',
+                        borderRadius:8, padding:'7px 10px', display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontSize:14 }}>📅</span>
+                        <div>
+                          <div style={{ fontSize:11,fontWeight:700,color:'#1D4ED8' }}>
+                            Interview: {c.interview_date}
+                          </div>
+                          {c.interviewer_name && (
+                            <div style={{ fontSize:10,color:'#3B82F6',marginTop:1 }}>
+                              with {c.interviewer_name}
+                            </div>
+                          )}
+                        </div>
+                        {c.status === 'Interview Done' && (
+                          <span style={{ marginLeft:'auto',fontSize:10,fontWeight:700,color:'#7C3AED',
+                            background:'#EDE9FE',borderRadius:5,padding:'2px 6px' }}>Done</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Skills */}
                     {c.skills && (
                       <div style={{ marginTop:9, display:'flex', flexWrap:'wrap', gap:3 }}>
                         {c.skills.split(',').map(s=>s.trim()).filter(Boolean).slice(0,4).map(s=>(
                           <span key={s} style={{ background:'#F4F4F5',color:'#52525B',borderRadius:5,padding:'2px 7px',fontSize:11 }}>{s}</span>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Outcome badge */}
+                    {['Hired','Rejected','Offer Extended','On Hold'].includes(c.status) && (
+                      <div style={{ marginTop:9, display:'flex', alignItems:'center', gap:6,
+                        background: STATUS_CONFIG[c.status]?.bg, borderRadius:8, padding:'6px 10px',
+                        border:'1px solid '+STATUS_CONFIG[c.status]?.dot+'40' }}>
+                        <span style={{ fontSize:13 }}>
+                          {c.status==='Hired'?'🎉':c.status==='Rejected'?'❌':c.status==='Offer Extended'?'📋':'⏸'}
+                        </span>
+                        <span style={{ fontSize:11,fontWeight:700,color:STATUS_CONFIG[c.status]?.color }}>
+                          {c.status}
+                          {c.rating>0 ? ' · ' : ''}
+                        </span>
+                        {c.rating>0 && <Stars value={c.rating} size={11}/>}
                       </div>
                     )}
                   </div>
@@ -1018,7 +1110,18 @@ ${text.slice(0, 7000)}`
               <div style={{ padding:'10px 14px', borderTop:'1px solid #F4F4F5',
                 display:'flex',alignItems:'center',gap:8 }}>
                 <span style={{ fontSize:16 }}>📄</span>
-                <span style={{ fontSize:12,fontWeight:600,color:'#15803D' }}>{c.resume_file_name}</span>
+                {c.resume_url ? (
+                  <a href={c.resume_url} target="_blank" rel="noreferrer"
+                    style={{ fontSize:12,fontWeight:700,color:'#2563EB',textDecoration:'none',
+                      display:'flex',alignItems:'center',gap:5 }}
+                    onClick={e=>e.stopPropagation()}>
+                    {c.resume_file_name}
+                    <span style={{ fontSize:10,background:'#DBEAFE',color:'#1D4ED8',
+                      borderRadius:4,padding:'1px 5px',fontWeight:700 }}>↓ Download</span>
+                  </a>
+                ) : (
+                  <span style={{ fontSize:12,fontWeight:600,color:'#94A3B8' }}>{c.resume_file_name} <span style={{fontSize:10}}>(not uploaded)</span></span>
+                )}
               </div>
             )}
           </div>
